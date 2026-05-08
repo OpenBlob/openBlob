@@ -1,0 +1,14 @@
+[workspace]
+members = ["host", "guest", "common"]
+resolver = "2"
+
+[workspace.dependencies]
+zisk-sdk = { git = "https://github.com/0xPolygonHermez/zisk.git", tag = "v0.17.0" }
+ziskos = { git = "https://github.com/0xPolygonHermez/zisk.git", tag = "v0.17.0" }
+
+# Patch tiny-keccak so any caller (direct or transitive) dispatches Keccak-f
+# to ZisK's `syscall_keccak_f` precompile instead of the software round
+# function. This must live at the workspace root — `[patch.crates-io]`
+# inside guest/Cargo.toml has no effect.
+[patch.crates-io]
+tiny-keccak = { git = "https://github.com/0xPolygonHermez/zisk-patch-tiny-keccak", branch = "zisk-patch/v2.0.2" }

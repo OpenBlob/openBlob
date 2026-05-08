@@ -1,0 +1,38 @@
+[package]
+name = "host"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+zisk-sdk = { workspace = true }
+anyhow = "1.0"
+serde = { version = "1.0", default-features = false, features = ["derive"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+alloy-sol-types = "1.5.7"
+alloy-primitives = "1.5.7"
+tiny-keccak = { version = "2.0", features = ["keccak"] }
+common = { path = "../common" }
+
+[build-dependencies]
+zisk-sdk = { workspace = true }
+common = { path = "../common" }
+
+[[bin]]
+name = "prove"
+path = "bin/prove.rs"
+
+[[bin]]
+name = "execute"
+path = "bin/execute.rs"
+
+[[bin]]
+name = "plonk"
+path = "bin/plonk.rs"
+
+[[bin]]
+name = "minimal"
+path = "bin/minimal.rs"
+
+[[bin]]
+name = "run"
+path = "bin/run.rs"
