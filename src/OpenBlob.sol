@@ -153,7 +153,8 @@ contract OpenBlob {
                 prevRoot,
                 newRoot,
                 totalEtherPaid,
-                blockhash(blockNumber)
+                blockhash(blockNumber),
+                msg.sender
             )
         );
 
