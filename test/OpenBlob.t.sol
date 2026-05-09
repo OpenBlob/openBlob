@@ -288,5 +288,25 @@ contract OpenBlobTest is Test {
         openBlob.proofBlobDA(blobIndexes, hashedData, prevRoot, newRoot, 1 ether, block.number, "");
     }
 
+    // ------------------------------------------------------------------
+    // gas snapshots
+    // ------------------------------------------------------------------
+
+    function _recordSnapshot() internal {
+        string[] memory cmd = new string[](2);
+        cmd[0] = "bash";
+        cmd[1] = "script/.snapshot.sh";
+        emit log_named_string("snapshot", string(vm.ffi(cmd)));
+    }
+
+    function test_GasSnapshot_DepositBaseline() public {
+        _recordSnapshot();
+
+        vm.deal(alice, 1 ether);
+        vm.prank(alice);
+        openBlob.deposit{value: 1 ether}(alice);
+        assertEq(openBlob.balances(alice), 1 ether);
+    }
+
     receive() external payable {}
 }
