@@ -73,7 +73,7 @@ CALLDATA=$(cat "$ART_DIR/proof.calldata")
 # 5. B sends the type-3 blob tx. cast handles KZG commitment + versioned hash.
 echo "==> B sends blob tx"
 cast send --rpc-url "$RPC_URL" --private-key "$ACTOR_B_PK" \
-    --blob --blob-file "$ART_DIR/blob.bin" \
+    --blob --path "$ART_DIR/blob.bin" \
     "$OPEN_BLOB_ADDR" "$CALLDATA"
 
 NEW_ROOT=$(cast call "$OPEN_BLOB_ADDR" "openBlobRoot()(bytes32)" --rpc-url "$RPC_URL")
