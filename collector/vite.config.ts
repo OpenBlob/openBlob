@@ -8,10 +8,12 @@ export default defineConfig({
   server: {
     port: 3000,
   },
-  ssr: {
-    // Bundle these for SSR so Deno doesn't try to resolve them as bare specifiers.
-    noExternal: ["wagmi", "viem", "@tanstack/react-query"],
-  },
+  // Intentionally no `ssr.noExternal` here. Inlining wagmi/viem into the SSR
+  // bundle pulled in 3+ duplicated copies of `ox` (a viem dependency) via
+  // wagmi's deeply nested connector ecosystem (@base-org/account, porto,
+  // @coinbase/wallet-sdk, …), which OOM'd Rollup. Externalizing them lets
+  // Deno resolve them at runtime via the local node_modules (see
+  // `nodeModulesDir: "auto"` in deno.json).
   ...denoWorkaround(),
 });
 
