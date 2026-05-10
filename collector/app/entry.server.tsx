@@ -6,14 +6,15 @@ import { isbot } from "isbot";
 import { renderToReadableStream } from "react-dom/server.edge";
 import { type AppLoadContext, type EntryContext, ServerRouter } from "react-router";
 
-import { registerBundlerCron } from "~/lib/bundler-cron.server";
-
-// Register the bundling cron at SSR-entry load time. This is the only
-// reliable hook in dev (`deno task dev`), where `server.ts` is never
-// loaded — Vite hosts the React Router app directly. In production, the
-// registrar's globalThis flag makes this a no-op (server.ts already
-// registered the cron at process start).
-registerBundlerCron();
+// Register the bundling cron at SSR-entry load time, but only in dev:
+// `deno task dev` never loads `server.ts`, so this is the only place where
+// we can wire up `Deno.cron` for local development. In production builds
+// Vite replaces `import.meta.env.DEV` with `false` and tree-shakes the
+// dynamic import out, so request isolates never pay to parse the bundler
+// module graph (which transitively pulls in viem + kzg-wasm).
+if (import.meta.env.DEV) {
+  void import("~/lib/bundler-cron.server").then((m) => m.registerBundlerCron());
+}
 
 export const streamTimeout = 5_000;
 

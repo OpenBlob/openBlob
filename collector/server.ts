@@ -21,10 +21,25 @@ import { registerBundlerCron } from "./app/lib/bundler-cron.server.ts";
 // `build/server/index.js`. We load it via a dynamic import + URL so neither
 // TypeScript nor `deno check` tries to resolve it at type-check time — that
 // way `deno task typecheck` works on a fresh clone before the first build.
+//
+// The import is deferred until the first HTTP request so that on Deno Deploy
+// the cron isolate (which evaluates this same file just to register the cron
+// callback) does not pay to parse + evaluate the entire React Router server
+// bundle every time it cold-starts.
 const buildUrl = new URL("./build/server/index.js", import.meta.url).href;
-const build = (await import(buildUrl)) as ServerBuild;
 
-const handler = createRequestHandler(build, "production");
+type Handler = ReturnType<typeof createRequestHandler>;
+let handlerPromise: Promise<Handler> | null = null;
+
+function getHandler(): Promise<Handler> {
+  if (!handlerPromise) {
+    handlerPromise = (async () => {
+      const build = (await import(buildUrl)) as ServerBuild;
+      return createRequestHandler(build, "production");
+    })();
+  }
+  return handlerPromise;
+}
 
 const clientRoot = new URL("./build/client/", import.meta.url);
 
@@ -73,6 +88,7 @@ Deno.serve(async (request) => {
   const url = new URL(request.url);
   const staticResponse = await tryServeStatic(url);
   if (staticResponse) return staticResponse;
+  const handler = await getHandler();
   return handler(request);
 });
 

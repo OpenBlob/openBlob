@@ -12,20 +12,27 @@
  * across both registration sites.
  */
 
-import { getPublisher } from "./blob-publisher.server.ts";
-import { listMicroblobs, markBundled } from "./kv.server.ts";
+// `kv.server.ts` and `blob-publisher.server.ts` are imported lazily inside
+// `processPending` so that:
+//   - request isolates that import this module (transitively, via
+//     `entry.server.tsx`) don't pay to parse `viem` + `kzg-wasm` on every
+//     cold-start; and
+//   - cron isolates only pull in the publisher (and viem) when there is
+//     actually pending work to bundle.
 
-const DEFAULT_SCHEDULE = "* * * * *";
+const DEFAULT_SCHEDULE = "*/5 * * * *";
 const CRON_NAME = "openblob-process";
 const REGISTERED_FLAG = "__openblobBundlerCronRegistered__";
 
 async function processPending(): Promise<void> {
+  const { listMicroblobs, markBundled } = await import("./kv.server.ts");
   const pending = await listMicroblobs({ status: "pending", limit: 100 });
   if (pending.length === 0) {
     console.log("[cron] no pending microblobs");
     return;
   }
 
+  const { getPublisher } = await import("./blob-publisher.server.ts");
   const publisher = getPublisher();
   if (!publisher) {
     console.warn(`[cron] BUNDLER_PRIVATE_KEY unset — leaving ${pending.length} microblob(s) pending`);

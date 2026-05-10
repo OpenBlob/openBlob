@@ -4,7 +4,7 @@ OpenBlob collects signed microblobs from connected wallets, stores them in
 [Deno KV](https://docs.deno.com/deploy/kv/manual/), and a server-side
 [`Deno.cron`](https://docs.deno.com/deploy/kv/manual/cron/) bundles pending
 microblobs into Ethereum [EIP-4844 blob transactions](https://eips.ethereum.org/EIPS/eip-4844)
-every minute.
+every few minutes (default `*/5 * * * *`, override with `CRON_SCHEDULE`).
 
 ## Stack
 
@@ -14,7 +14,7 @@ every minute.
 - [wagmi 2](https://wagmi.sh/) + [viem 2](https://viem.sh/) for wallet + Ethereum.
 - [Deno 2.x](https://deno.com/) as runtime, package manager, and HTTP server.
 - [Deno KV](https://docs.deno.com/deploy/kv/manual/) for storage.
-- [Deno Cron](https://docs.deno.com/deploy/kv/manual/cron/) for the per-minute bundling job.
+- [Deno Cron](https://docs.deno.com/deploy/kv/manual/cron/) for the periodic bundling job.
 - [Biome](https://biomejs.dev/) for linting/formatting.
 
 ## Layout
@@ -77,9 +77,10 @@ deno task start   # runs server.ts (Deno HTTP + Deno.cron)
 
 1. Static asset serving from `build/client/`.
 2. The React Router request handler from `build/server/index.js`.
-3. `Deno.cron("openblob-process", "* * * * *", …)` which calls the bundling
+3. `Deno.cron("openblob-process", "*/5 * * * *", …)` which calls the bundling
    logic in-process (reads pending microblobs from Deno KV, marks them
-   bundled). No HTTP roundtrip back into the server.
+   bundled). No HTTP roundtrip back into the server. The schedule is
+   overridable via `CRON_SCHEDULE`.
 
 The local production server binds to Deno's default port (`8000`). On Deno
 Deploy the platform manages the listener, so the chosen port is irrelevant.
@@ -117,7 +118,7 @@ curl -s http://localhost:3000/api/microblobs/tx/0xabc...def | jq
 
 See `.env.example`. Notable knobs:
 
-- `CRON_SCHEDULE` — overrides the default `* * * * *`.
+- `CRON_SCHEDULE` — overrides the default `*/5 * * * *` (set to `* * * * *` to bundle every minute, at the cost of more cron-isolate cold starts on Deno Deploy).
 - `DENO_KV_PATH` — optional path for the Deno KV file (defaults to in-memory in dev, persistent in Deno Deploy).
 
 ## Adding shadcn components
