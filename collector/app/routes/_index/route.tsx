@@ -8,17 +8,9 @@ import { Button } from "~/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "~/components/ui/card";
 import { Textarea } from "~/components/ui/textarea";
 import { nextCronRun } from "~/lib/cron";
+import { listMicroblobs, type Microblob } from "~/lib/kv.server";
 
 import type { Route } from "./+types/route";
-
-type Microblob = {
-  id: string;
-  address: string;
-  payload: string;
-  signature: string;
-  hash: string;
-  createdAt: number;
-};
 
 const DEFAULT_CRON_SCHEDULE = "* * * * *";
 
@@ -30,10 +22,14 @@ function getCronSchedule(): string {
   return fromEnv && fromEnv.trim().length > 0 ? fromEnv : DEFAULT_CRON_SCHEDULE;
 }
 
-export async function loader({ request }: Route.LoaderArgs) {
-  const url = new URL("/api/microblobs", request.url);
-  const res = await fetch(url, { headers: { accept: "application/json" } });
-  const data = (await res.json()) as { microblobs: Microblob[] };
+export async function loader(_args: Route.LoaderArgs) {
+  // Read straight from KV instead of self-fetching `/api/microblobs`. The
+  // self-fetch was both slower (extra HTTP roundtrip back into ourselves)
+  // and fragile in production: if anything in front of the server returns
+  // non-JSON for the API path (an error page, an auth gate, a misrouted
+  // request, etc.), `res.json()` here would throw `Unexpected non-whitespace
+  // character after JSON`.
+  const microblobs = await listMicroblobs({ status: "pending", limit: 50 });
   const cronSchedule = getCronSchedule();
   let nextRunAt: number;
   try {
@@ -41,7 +37,7 @@ export async function loader({ request }: Route.LoaderArgs) {
   } catch {
     nextRunAt = nextCronRun(DEFAULT_CRON_SCHEDULE);
   }
-  return { ...data, cronSchedule, nextRunAt };
+  return { microblobs, cronSchedule, nextRunAt };
 }
 
 export default function Home({ loaderData }: Route.ComponentProps) {
