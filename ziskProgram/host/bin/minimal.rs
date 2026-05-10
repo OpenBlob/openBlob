@@ -12,9 +12,9 @@ async fn main() -> Result<()> {
     let stdin = ZiskStdin::new();
     stdin.write(&inputs);
     println!(
-        "Input prepared: {} blobs, {} hashedData",
-        inputs.blobhashes.len(),
-        inputs.hashed_data.len()
+        "Input prepared: {} blobs, msg.sender={:02x?}",
+        inputs.blobs.len(),
+        inputs.msg_sender
     );
 
     // Create a `ProverClient` method.

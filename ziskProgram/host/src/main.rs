@@ -18,7 +18,7 @@ async fn main() -> Result<()> {
     stdin.write(&inputs);
     println!(
         "Input prepared: {} blobs, prevRoot={:02x?}",
-        inputs.blobhashes.len(),
+        inputs.blobs.len(),
         inputs.prev_root
     );
 

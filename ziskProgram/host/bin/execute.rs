@@ -12,9 +12,9 @@ async fn main() -> Result<()> {
     let stdin = ZiskStdin::new();
     stdin.write(&inputs);
     println!(
-        "Input prepared: {} blobs, {} hashedData",
-        inputs.blobhashes.len(),
-        inputs.hashed_data.len()
+        "Input prepared: {} blobs, msg.sender={:02x?}",
+        inputs.blobs.len(),
+        inputs.msg_sender
     );
 
     println!("Building prover client...");
@@ -34,8 +34,9 @@ async fn main() -> Result<()> {
     println!("Reading public outputs...");
     let output: Output = result.get_public_values_abi()?;
     println!("Public outputs:");
-    println!("  publicInputsHash: {:02x?}", output.publicInputsHash);
-    println!("  valid: {}", output.valid);
+    println!("  publicInputsHash:      {:02x?}", output.publicInputsHash);
+    println!("  valid:                 {}", output.valid);
+    println!("  totalEtherAccumulated: {:02x?}", output.totalEtherAccumulated);
 
     Ok(())
 }
