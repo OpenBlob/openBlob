@@ -7,6 +7,7 @@ import type { Address, Hex } from "viem";
  *   ["microblobs", "by_id", id]      → Microblob
  *   ["microblobs", "by_status", "pending", createdAt, id] → id (secondary index)
  *   ["microblobs", "by_status", "bundled", createdAt, id] → id (secondary index)
+ *   ["microblobs", "by_tx", bundleTxHash, createdAt, id]  → id (secondary index)
  */
 export type Microblob = {
   id: string;
@@ -34,6 +35,17 @@ export async function getKv(): Promise<Deno.Kv> {
 const ID_KEY = (id: string) => ["microblobs", "by_id", id] as const;
 const PENDING_KEY = (createdAt: number, id: string) => ["microblobs", "by_status", "pending", createdAt, id] as const;
 const BUNDLED_KEY = (createdAt: number, id: string) => ["microblobs", "by_status", "bundled", createdAt, id] as const;
+const BY_TX_KEY = (txHash: Hex, createdAt: number, id: string) =>
+  ["microblobs", "by_tx", txHash, createdAt, id] as const;
+
+/**
+ * Tx hashes indexed via {@link BY_TX_KEY} are normalized to lowercase so that
+ * lookups by raw user input (which may be 0xABC… or 0xabc…) hit the same key
+ * the writer used.
+ */
+function normalizeTxHash(txHash: Hex): Hex {
+  return txHash.toLowerCase() as Hex;
+}
 
 export async function putMicroblob(microblob: Microblob): Promise<void> {
   const kv = await getKv();
@@ -67,6 +79,8 @@ export async function listMicroblobs(opts?: { status?: "pending" | "bundled"; li
 
 export async function markBundled(ids: string[], bundleTxHash: Hex): Promise<number> {
   const kv = await getKv();
+  // Normalize once so both the stored field and the by_tx index agree on case.
+  const normalizedTxHash = normalizeTxHash(bundleTxHash);
   let updated = 0;
   for (const id of ids) {
     const entry = await kv.get<Microblob>(ID_KEY(id));
@@ -76,7 +90,7 @@ export async function markBundled(ids: string[], bundleTxHash: Hex): Promise<num
       ...entry.value,
       status: "bundled",
       bundledAt,
-      bundleTxHash,
+      bundleTxHash: normalizedTxHash,
     };
     const res = await kv
       .atomic()
@@ -84,8 +98,35 @@ export async function markBundled(ids: string[], bundleTxHash: Hex): Promise<num
       .set(ID_KEY(id), next)
       .delete(PENDING_KEY(entry.value.createdAt, id))
       .set(BUNDLED_KEY(bundledAt, id), id)
+      .set(BY_TX_KEY(normalizedTxHash, entry.value.createdAt, id), id)
       .commit();
     if (res.ok) updated++;
   }
   return updated;
+}
+
+/**
+ * Look up every microblob bundled into a given EIP-4844 blob transaction.
+ *
+ * Returns records in `createdAt` order (oldest first) so consumers can
+ * reproduce the spec §4 RLP entry order produced by the bundler — that
+ * encoder iterates the pending list in `createdAt` order too.
+ *
+ * Note: only txs produced by this collector are indexed. Microblobs bundled
+ * before the `by_tx` index existed will be missing here even though their
+ * `bundleTxHash` field is populated.
+ */
+export async function listMicroblobsByTx(txHash: Hex): Promise<Microblob[]> {
+  const kv = await getKv();
+  const prefix = ["microblobs", "by_tx", normalizeTxHash(txHash)];
+  const ids: string[] = [];
+  for await (const entry of kv.list<string>({ prefix })) {
+    ids.push(entry.value);
+  }
+  if (ids.length === 0) return [];
+  const items = await kv.getMany<Microblob[]>(ids.map((id) => ID_KEY(id)));
+  return items
+    .map((entry) => entry.value)
+    .filter((value): value is Microblob => value !== null)
+    .sort((a, b) => a.createdAt - b.createdAt);
 }

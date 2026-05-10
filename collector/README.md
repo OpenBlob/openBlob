@@ -32,8 +32,9 @@ openblob/
     ├── entry.server.tsx        # SSR entry
     ├── routes.ts               # flatRoutes() configuration
     ├── routes/
-    │   ├── _index/route.tsx    # Landing page (sign + submit)
-    │   └── api.microblobs.ts   # GET list, POST submit signed microblob
+    │   ├── _index/route.tsx              # Landing page (sign + submit)
+    │   ├── api.microblobs.ts             # GET list, POST submit signed microblob
+    │   └── api.microblobs.tx.$txHash.ts  # GET microblobs bundled into a blob tx
     ├── components/
     │   ├── ui/                 # shadcn components (button, card, input, textarea)
     │   └── connect-button.tsx  # wagmi connect / disconnect
@@ -82,6 +83,35 @@ deno task start   # runs server.ts (Deno HTTP + Deno.cron)
 
 The local production server binds to Deno's default port (`8000`). On Deno
 Deploy the platform manages the listener, so the chosen port is irrelevant.
+
+## HTTP API
+
+| Method | Path                            | Description                                               |
+| ------ | ------------------------------- | --------------------------------------------------------- |
+| `GET`  | `/api/microblobs`               | List the most recent pending microblobs.                  |
+| `POST` | `/api/microblobs`               | Submit `{ address, payload, signature }`. Verifies EIP-191. |
+| `GET`  | `/api/microblobs/tx/:txHash`    | List every microblob this collector bundled into the given EIP-4844 blob tx. |
+
+The `tx/:txHash` endpoint returns the full sidecar — payload, signer, signature,
+and per-entry message hash — for each microblob, in the same `createdAt` order
+the bundler used when building the spec §4 RLP list. Signatures live in KV
+(spec §5: out-of-band) so this endpoint only knows about txs produced by this
+collector; foreign blob txs return an empty list.
+
+```bash
+curl -s http://localhost:3000/api/microblobs/tx/0xabc...def | jq
+# {
+#   "txHash": "0xabc...def",
+#   "count": 2,
+#   "microblobs": [
+#     { "id": "...", "address": "0x...", "payload": "hello blob",
+#       "signature": "0x...", "hash": "0x...", "status": "bundled",
+#       "createdAt": 1736500000000, "bundledAt": 1736500060000,
+#       "bundleTxHash": "0xabc...def" },
+#     ...
+#   ]
+# }
+```
 
 ## Environment variables
 
