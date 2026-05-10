@@ -12,8 +12,7 @@
  * across both registration sites.
  */
 
-import type { Hex } from "viem";
-
+import { getPublisher } from "./blob-publisher.server.ts";
 import { listMicroblobs, markBundled } from "./kv.server.ts";
 
 const DEFAULT_SCHEDULE = "* * * * *";
@@ -27,14 +26,18 @@ async function processPending(): Promise<void> {
     return;
   }
 
-  // TODO: assemble an EIP-4844 blob transaction from `pending` and broadcast
-  // it. For now we mark them bundled with a placeholder tx hash.
-  const placeholderTxHash = `0x${"0".repeat(64)}` as Hex;
+  const publisher = getPublisher();
+  if (!publisher) {
+    console.warn(`[cron] BUNDLER_PRIVATE_KEY unset — leaving ${pending.length} microblob(s) pending`);
+    return;
+  }
+
+  const { txHash, used } = await publisher.publishMicroblobs(pending);
   const bundled = await markBundled(
-    pending.map((m) => m.id),
-    placeholderTxHash,
+    used.map((m) => m.id),
+    txHash,
   );
-  console.log(`[cron] bundled ${bundled} microblob(s) tx=${placeholderTxHash}`);
+  console.log(`[cron] published ${bundled} microblob(s) tx=${txHash}`);
 }
 
 export function registerBundlerCron(): void {

@@ -29,7 +29,6 @@ used by every public EIP-4844 data-availability layer in production.
 | `USABLE_BYTES_PER_FIELD`      | `31`                                                               |
 | `BLOB_RAW_BYTES`              | `4096 * 32 = 131072`                                               |
 | `BLOB_PAYLOAD_BYTES`          | `4096 * 31 = 126976`                                               |
-| `LENGTH_PREFIX_BYTES`         | `4` (big-endian `uint32`)                                          |
 | `BLS_MODULUS`                 | see §1                                                             |
 
 ## 3. Field-Element Packing (32 ↔ 31)
@@ -44,18 +43,41 @@ F[i]  =  0x00 || P[i]                       (32 bytes total)
 P[i]  =  F[i][1..32]                        (31 bytes payload)
 ```
 
-Define the **logical payload stream** `S` as the concatenation:
+Define the **per-blob payload** `P_blob` as the concatenation of one
+blob's field-element payloads:
 
 ```
-S  =  P[0] || P[1] || ... || P[4095]
-|S| =  126976 bytes
+P_blob  =  P[0] || P[1] || ... || P[4095]
+|P_blob| =  126976 bytes  (= BLOB_PAYLOAD_BYTES)
 ```
+
+### 3.0 Logical Stream Across a Transaction
+
+A type-3 transaction MAY carry up to 6 blobs. Let `B_0, B_1, …,
+B_{n-1}` be the blobs of a single transaction in the order they
+appear in the transaction's `blobVersionedHashes` field, and let
+`P_j` be each blob's payload as decoded by §3.2. The transaction's
+**logical stream** `S` is the concatenation of all per-blob
+payloads:
+
+```
+S    =  P_0 || P_1 || ... || P_{n-1}
+|S|  =  n * BLOB_PAYLOAD_BYTES
+```
+
+The framing rules in §4 apply to `S` as a whole. Entries MAY straddle
+blob boundaries; verifiers reconstructing entries MUST fetch all `n`
+blobs of the producing transaction.
 
 ### 3.1 Encoder (payload bytes → blob)
 
 ```
 def encode_blob(payload: bytes) -> bytes:
     assert len(payload) <= BLOB_PAYLOAD_BYTES
+    # Padding (the bytes past `len(payload)` up to BLOB_PAYLOAD_BYTES)
+    # is any byte sequence that preserves §3 canonicality. Zero-padding
+    # (shown) is one acceptable choice; viem's `toBlobs` writes a 0x80
+    # sentinel followed by zeros and is also acceptable.
     payload = payload + b"\x00" * (BLOB_PAYLOAD_BYTES - len(payload))
     blob = bytearray()
     for i in range(FIELD_ELEMENTS_PER_BLOB):
@@ -83,65 +105,93 @@ def decode_blob(blob: bytes) -> bytes:
 A blob whose any field element has `F[i][0] != 0x00` is **invalid** under
 this spec and MUST be rejected.
 
-## 4. Logical Payload Layout (Length-Prefixed Entries)
+## 4. Logical Payload Layout (RLP-Framed Entries)
 
-The 126976-byte logical stream `S` carries a sequence of entries, each
-prefixed by its length:
+The transaction's logical stream `S` (§3.0) carries an RLP-encoded list
+of entries, followed by §3.1 padding:
 
 ```
-S  =  ( len_0 || data_0 ) || ( len_1 || data_1 ) || ... || padding
+S  =  RLP([ data_0, data_1, ..., data_{k-1} ])  ||  padding
 ```
 
 Where:
 
-* `len_i` is a **4-byte big-endian unsigned integer** giving the length of
-  `data_i` in bytes.
-* `data_i` is `len_i` bytes of opaque application data.
-* After the last entry, the remainder of `S` is zero-padded to
-  `BLOB_PAYLOAD_BYTES`.
-* A length prefix of `0x00000000` (i.e. `len = 0`) signals **end of
-  entries**; everything after it is padding and MUST NOT be parsed.
+* `RLP(...)` is the canonical Recursive Length Prefix encoding as
+  defined by the Ethereum Yellow Paper, Appendix B.
+* Each `data_i` is opaque application data, encoded as an RLP byte
+  string.
+* After the RLP list, the remainder of `S` is padding (§3.1).
 
 ### 4.1 Constraints
 
-* `1 <= len_i <= 2^32 - 1` for every real entry.
-* `sum_i (4 + len_i) <= BLOB_PAYLOAD_BYTES = 126976`.
-* An entry MUST NOT straddle the end of `S`. The decoder MUST reject a
-  blob whose final entry would extend past byte `126976`.
+* `len(RLP_bytes) <= |S| = n * BLOB_PAYLOAD_BYTES`, where `n` is the
+  number of blobs in the producing transaction.
+* The RLP encoding MUST be canonical: minimal-length integer prefixes,
+  no trailing junk inside the list body. Decoders MUST reject
+  non-canonical RLP.
+* RLP self-delimits each item, so there is no separate terminator and
+  no per-entry length cap beyond `BLOB_PAYLOAD_BYTES * n`.
 
 ### 4.2 Parser
 
 ```
 def parse_entries(S: bytes) -> list[bytes]:
-    assert len(S) == BLOB_PAYLOAD_BYTES
-    entries, cur = [], 0
-    while cur + LENGTH_PREFIX_BYTES <= len(S):
-        n = int.from_bytes(S[cur:cur+4], "big")
-        cur += 4
-        if n == 0:
-            break                     # terminator / start of padding
-        if cur + n > len(S):
-            raise ValueError("entry overruns blob")
-        entries.append(S[cur:cur+n])
-        cur += n
-    return entries
+    assert len(S) % BLOB_PAYLOAD_BYTES == 0
+    items, _consumed = rlp_decode_list(S)   # canonical RLP only
+    return items                            # padding bytes ignored
 ```
+
+`rlp_decode_list` is the standard canonical RLP list decoder
+(Yellow Paper Appendix B). It reads exactly the bytes covered by the
+list's length prefix; any bytes after that are §3.1 padding and MUST
+NOT be interpreted.
 
 ### 4.3 Worked Example
 
 Two entries `data_0 = "hello"` (5 bytes) and `data_1 = "world!"` (6
-bytes):
+bytes). Canonical RLP encodings of each item:
 
 ```
-S[0..4]    = 00 00 00 05                 # len_0 = 5
-S[4..9]    = 68 65 6c 6c 6f              # "hello"
-S[9..13]   = 00 00 00 06                 # len_1 = 6
-S[13..19]  = 77 6f 72 6c 64 21           # "world!"
-S[19..23]  = 00 00 00 00                 # terminator
-S[23..]    = 00 00 ... 00                # zero padding
+RLP("hello")   =  85 68 65 6c 6c 6f                  # 6 bytes
+RLP("world!")  =  86 77 6f 72 6c 64 21               # 7 bytes
 ```
 
-After 31→32 packing (§3.1), `S` becomes the on-chain blob.
+The list's payload length is `6 + 7 = 13` bytes, so the list prefix is
+`0xc0 + 13 = 0xcd`:
+
+```
+RLP([...])     =  cd 85 68 65 6c 6c 6f 86 77 6f 72 6c 64 21   # 14 bytes
+```
+
+Therefore:
+
+```
+S[0..14]   =  cd 85 68 65 6c 6c 6f 86 77 6f 72 6c 64 21
+S[14..]    =  padding (§3.1)
+```
+
+After 31→32 packing (§3.1), `S` becomes the on-chain blob (or
+sequence of blobs, per §3.0).
+
+### 4.4 Reference Implementations (informative)
+
+The amended framing maps directly onto viem's blob and RLP helpers:
+
+```ts
+import { fromBlobs, fromRlp, toBlobs, toBytes, toRlp } from 'viem'
+
+// Encoder
+const data    = toRlp(payloads.map(toBytes))   // §4
+const blobs   = toBlobs({ data })              // §3.1, multi-blob via §3.0
+
+// Decoder (given every blob of the tx in order)
+const stitched  = fromBlobs({ blobs, to: 'hex' })
+const recovered = fromRlp(stitched, 'bytes')
+```
+
+Equivalent helpers exist in ethers.js, `@ethereumjs/rlp`, and the
+Python `rlp` and `eth-rlp` packages; any canonical RLP library is
+acceptable.
 
 ## 5. Per-Entry Ethereum Signature (Out-of-Band)
 
@@ -161,22 +211,29 @@ digest  = keccak256( prefix || data_i )
 sig_i   = secp256k1_sign(privkey, digest)        # 65 bytes: r || s || v
 ```
 
-Note: only `data_i` is signed. The 4-byte `len_i` prefix and any
-surrounding blob framing are NOT covered by the signature — they are
-recoverable from the blob itself.
+Note: only `data_i` is signed. The surrounding RLP framing (§4) and
+any blob-level packing (§3) are NOT covered by the signature — they
+are recoverable from the blob(s) themselves.
+
+Reference (informative): viem's `hashMessage(data)` is the canonical
+implementation of the digest above; viem's
+`verifyMessage({ address, message, signature })` is the canonical
+verifier. Equivalent helpers exist in ethers.js, web3.py, etc.
 
 ### 5.2 Verification
 
 A verifier:
 
-1. Fetches the blob (or its KZG-committed contents) and decodes it per
-   §3.2 and §4.2 to obtain `data_0 .. data_{k-1}`.
+1. Fetches every blob of the producing transaction (or their
+   KZG-committed contents), decodes each per §3.2, concatenates them
+   per §3.0 to reconstruct `S`, and runs §4.2 on `S` to obtain
+   `data_0 .. data_{k-1}`.
 2. For each `(data_i, sig_i)` pair received out-of-band, recomputes
    `digest_i` per §5.1 and runs `ecrecover(digest_i, sig_i)` to obtain
    the signer address.
 3. Accepts the entry iff the recovered address matches the expected
-   author (e.g. an allow-list, an on-chain registry, or a value bound to
-   the blob's versioned hash on L1).
+   author (e.g. an allow-list, an on-chain registry, or a value bound
+   to one of the transaction's `blobVersionedHashes` on L1).
 
 ### 5.3 Sidecar Format (informative)
 
@@ -200,18 +257,22 @@ pairs is acceptable.
 * **Canonicality.** The `F[i][0] == 0x00` invariant is the only thing
   keeping every field element below `BLS_MODULUS`. Encoders MUST NOT
   write a non-zero high byte; decoders MUST reject blobs that do.
-* **No length-prefix authentication.** Because only `data_i` is signed,
-  a malicious republisher can re-frame the same `data_i` into a
-  different blob layout. Consumers that care about ordering or
-  co-location MUST bind to `blobVersionedHash` (e.g. by including it in
-  whatever they hash on L1).
+  This rule applies to padding bytes (§3.1) as well as to bytes
+  covered by the RLP framing.
+* **No framing authentication.** Because only `data_i` is signed, a
+  malicious republisher can re-frame the same `data_i` into a
+  different RLP list, a different blob layout, or a different
+  transaction. Consumers that care about ordering or co-location MUST
+  bind to `blobVersionedHash` (e.g. by including it in whatever they
+  hash on L1).
 * **Replay across blobs.** A signature over `data_i` is valid for any
-  blob that contains the exact same `data_i`. If replay matters, include
-  a nonce or `blobVersionedHash` inside `data_i`.
-* **Trailing-zero ambiguity.** `data_i` MAY contain trailing `0x00`
-  bytes; the length prefix disambiguates them from padding. The `len =
-  0` terminator is therefore not optional — without it, an all-zero tail
-  could be mistaken for a giant zero-filled entry.
+  blob that contains the exact same `data_i`. If replay matters,
+  include a nonce or `blobVersionedHash` inside `data_i`.
+* **Cross-blob assembly.** A verifier MUST fetch every blob of the
+  producing transaction (by `txHash` or by the full
+  `blobVersionedHashes` set) before decoding entries. An entry MAY
+  straddle blob boundaries; consumers holding a strict subset of a
+  tx's blobs cannot recover such entries.
 
 ## 7. References
 
@@ -222,3 +283,8 @@ pairs is acceptable.
   <https://github.com/ethereum/consensus-specs/blob/dev/specs/deneb/polynomial-commitments.md>
 * EIP-191 — Signed Data Standard:
   <https://eips.ethereum.org/EIPS/eip-191>
+* Ethereum Yellow Paper, Appendix B (Recursive Length Prefix):
+  <https://ethereum.github.io/yellowpaper/paper.pdf>
+* viem — informative reference implementation of `toBlobs`,
+  `fromBlobs`, `toRlp`, `fromRlp`, `hashMessage`, `verifyMessage`:
+  <https://viem.sh/>

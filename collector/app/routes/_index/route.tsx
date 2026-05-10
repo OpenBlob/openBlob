@@ -29,7 +29,11 @@ export async function loader(_args: Route.LoaderArgs) {
   // non-JSON for the API path (an error page, an auth gate, a misrouted
   // request, etc.), `res.json()` here would throw `Unexpected non-whitespace
   // character after JSON`.
-  const microblobs = await listMicroblobs({ status: "pending", limit: 50 });
+  const [pending, bundled] = await Promise.all([
+    listMicroblobs({ status: "pending", limit: 50 }),
+    listMicroblobs({ status: "bundled", limit: 50 }),
+  ]);
+  const microblobs = [...pending, ...bundled].sort((a, b) => b.createdAt - a.createdAt);
   const cronSchedule = getCronSchedule();
   let nextRunAt: number;
   try {
@@ -143,8 +147,8 @@ export default function Home({ loaderData }: Route.ComponentProps) {
 
           <Card>
             <CardHeader>
-              <CardTitle>Pending microblobs</CardTitle>
-              <CardDescription>The freshest entries waiting to be bundled.</CardDescription>
+              <CardTitle>Recent microblobs</CardTitle>
+              <CardDescription>Pending and recently bundled entries.</CardDescription>
             </CardHeader>
             <CardContent>
               {microblobs.length === 0 ? (
@@ -153,11 +157,14 @@ export default function Home({ loaderData }: Route.ComponentProps) {
                 <ul className="flex flex-col gap-3">
                   {microblobs.map((m) => (
                     <li key={m.id} className="rounded-md border bg-card/50 p-3">
-                      <div className="flex items-center justify-between">
-                        <span className="font-mono text-xs">{m.address}</span>
-                        <span className="text-muted-foreground text-xs">
-                          {new Date(m.createdAt).toLocaleTimeString()}
-                        </span>
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="truncate font-mono text-xs">{m.address}</span>
+                        <div className="flex shrink-0 items-center gap-2">
+                          <StatusPill microblob={m} />
+                          <span className="text-muted-foreground text-xs">
+                            {new Date(m.createdAt).toLocaleTimeString()}
+                          </span>
+                        </div>
                       </div>
                       <p className="mt-1 truncate text-sm">{m.payload}</p>
                       <p className="mt-1 truncate font-mono text-muted-foreground text-xs">hash {m.hash}</p>
@@ -170,5 +177,26 @@ export default function Home({ loaderData }: Route.ComponentProps) {
         </section>
       </main>
     </div>
+  );
+}
+
+function StatusPill({ microblob }: { microblob: Microblob }) {
+  if (microblob.status === "bundled" && microblob.bundleTxHash) {
+    return (
+      <a
+        href={`https://sepolia.etherscan.io/tx/${microblob.bundleTxHash}`}
+        target="_blank"
+        rel="noreferrer"
+        className="rounded-full bg-emerald-500/15 px-2 py-0.5 font-medium text-[10px] text-emerald-700 uppercase tracking-wide transition-colors hover:bg-emerald-500/25 dark:text-emerald-300"
+        title={`View blob tx on Etherscan: ${microblob.bundleTxHash}`}
+      >
+        bundled
+      </a>
+    );
+  }
+  return (
+    <span className="rounded-full bg-muted px-2 py-0.5 font-medium text-[10px] text-muted-foreground uppercase tracking-wide">
+      pending
+    </span>
   );
 }
