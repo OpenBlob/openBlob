@@ -1,9 +1,5 @@
 import { isbot } from "isbot";
-// Force the Web-Streams ("edge") build of `react-dom/server` so this entry runs
-// under Deno + Vite's SSR module runner. The default `react-dom/server`
-// resolves to the Node build, which uses `require()` internals that Vite's
-// dev-mode module runner cannot evaluate.
-import { renderToReadableStream } from "react-dom/server.edge";
+import { renderToReadableStream } from "react-dom/server";
 import { type AppLoadContext, type EntryContext, ServerRouter } from "react-router";
 
 // Register the bundling cron at SSR-entry load time, but only in dev:
@@ -16,8 +12,6 @@ if (import.meta.env.DEV) {
   void import("~/lib/bundler-cron.server").then((m) => m.registerBundlerCron());
 }
 
-export const streamTimeout = 5_000;
-
 export default async function handleRequest(
   request: Request,
   responseStatusCode: number,
@@ -25,23 +19,32 @@ export default async function handleRequest(
   routerContext: EntryContext,
   _loadContext: AppLoadContext,
 ) {
-  let didError = false;
+  let shellRendered = false;
+
   const body = await renderToReadableStream(<ServerRouter context={routerContext} url={request.url} />, {
-    signal: AbortSignal.timeout(streamTimeout),
     onError(error: unknown) {
-      didError = true;
-      console.error(error);
+      responseStatusCode = 500;
+      // Only log post-shell streaming errors. Errors thrown during initial
+      // shell rendering reject the `renderToReadableStream` promise and are
+      // surfaced through React Router's error boundary plumbing.
+      if (shellRendered) {
+        console.error(error);
+      }
     },
   });
+  shellRendered = true;
 
+  // Bots and SPA Mode renders need the full HTML up front (no progressive
+  // streaming), so wait for every Suspense boundary to settle before
+  // sending the response.
   const userAgent = request.headers.get("user-agent");
-  if (userAgent && isbot(userAgent)) {
+  if ((userAgent && isbot(userAgent)) || routerContext.isSpaMode) {
     await body.allReady;
   }
 
   responseHeaders.set("Content-Type", "text/html");
   return new Response(body, {
     headers: responseHeaders,
-    status: didError ? 500 : responseStatusCode,
+    status: responseStatusCode,
   });
 }
