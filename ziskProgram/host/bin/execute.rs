@@ -37,6 +37,7 @@ async fn main() -> Result<()> {
     println!("  publicInputsHash:      {:02x?}", output.publicInputsHash);
     println!("  valid:                 {}", output.valid);
     println!("  totalEtherAccumulated: {:02x?}", output.totalEtherAccumulated);
+    println!("  signersHash:           {:02x?}", output.signersHash);
 
     Ok(())
 }

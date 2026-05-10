@@ -24,16 +24,22 @@
 // Computes:
 //   * `totalEtherAccumulated` = saturating sum of every
 //     `entry_auths[i].ether_amount`.
+//   * `signersHash` = `keccak256(addr_0 || ... || addr_{k-1})` over the
+//     20-byte addresses recovered from each entry's signature, in entry
+//     order. Lets a verifier match the signer set against an off-chain
+//     allow-list (§5.2 step 3) without exposing each address publicly.
 //
-// Commits `Output { publicInputsHash, valid: true, totalEtherAccumulated }`.
+// Commits `Output { publicInputsHash, valid: true, totalEtherAccumulated,
+// signersHash }`.
 
 #![no_main]
 ziskos::entrypoint!(main);
 
+use alloy_primitives::Address;
 use alloy_sol_types::SolValue;
 use common::{
-    GuestInputs, Output, compute_public_inputs_hash, decode_entries, sum_ether,
-    unpack_blobs,
+    GuestInputs, Output, compute_public_inputs_hash, decode_entries, keccak_signers,
+    sum_ether, unpack_blobs,
 };
 
 fn main() {
@@ -65,29 +71,30 @@ fn main() {
     // 6. §5 ECDSA recovery on each (data_i, sig_i) pair. `recover` enforces
     // v ∈ {27, 28} and low-`s`, and panics on any malformed signature; a
     // successful recovery binds the entry to *some* signer address.
-    // Application-layer authorship policy (§5.2 step 3) is out of scope for
-    // the circuit — see TODO.md.
-    for (i, (data, auth)) in entries.iter().zip(&inputs.entry_auths).enumerate() {
-        let _signer = auth.recover(data);
-        // Force the recovered address to be observable to the prover (and
-        // therefore included in the witness), without committing it as a
-        // public output. Future work: commit a Merkle root of recovered
-        // signers so verifiers can check authorship policies.
-        let _ = _signer;
-        let _ = i;
+    // Recovered addresses are collected and hashed into `signersHash` so
+    // the §5.2 step 3 application-policy check can run off-chain against an
+    // allow-list / registry by hashing that list the same way and matching.
+    let mut signers: Vec<Address> = Vec::with_capacity(entries.len());
+    for (data, auth) in entries.iter().zip(&inputs.entry_auths) {
+        signers.push(auth.recover(data));
     }
 
     // Sum per-signature ether amounts (saturating).
     let total_ether_accumulated = sum_ether(&inputs.entry_auths);
 
+    // Commit the recovered signer set as a single keccak256 digest.
+    let signers_hash = keccak_signers(&signers);
+
     let output = Output {
         publicInputsHash: public_inputs_hash.into(),
         valid: true,
         totalEtherAccumulated: total_ether_accumulated.into(),
+        signersHash: signers_hash.into(),
     };
 
     println!("publicInputsHash:       {:02x?}", public_inputs_hash);
     println!("totalEtherAccumulated:  {:02x?}", total_ether_accumulated);
+    println!("signersHash:            {:02x?}", signers_hash);
     println!("entries verified:       {}", inputs.entry_auths.len());
 
     ziskos::io::commit_slice(&output.abi_encode());

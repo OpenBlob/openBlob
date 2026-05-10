@@ -1,5 +1,9 @@
+use alloy_primitives::Address;
 use anyhow::Result;
-use common::{Output, compute_public_inputs_hash, sample_inputs, sum_ether};
+use common::{
+    Output, compute_public_inputs_hash, decode_entries, keccak_signers, sample_inputs,
+    sum_ether, unpack_blobs,
+};
 use zisk_sdk::{
     GuestProgram, Proof, ProverClient, PublicValues, ZiskStdin, load_program,
 };
@@ -45,13 +49,28 @@ async fn main() -> Result<()> {
 
     let expected_hash = compute_public_inputs_hash(&inputs);
     let expected_total_ether = sum_ether(&inputs.entry_auths);
+
+    // Reconstruct the signer set off-chain the same way the guest does, so
+    // the loaded-proof verifier path can match `signersHash` against this
+    // host-side computation.
+    let stream = unpack_blobs(&inputs.blob_data, inputs.blobs.len());
+    let entries = decode_entries(&stream);
+    let signers: Vec<Address> = entries
+        .iter()
+        .zip(&inputs.entry_auths)
+        .map(|(data, auth)| auth.recover(data))
+        .collect();
+    let expected_signers_hash = keccak_signers(&signers);
+
     let output = Output {
         publicInputsHash: expected_hash.into(),
         valid: true,
         totalEtherAccumulated: expected_total_ether.into(),
+        signersHash: expected_signers_hash.into(),
     };
     println!("Expected publicInputsHash:      {:02x?}", expected_hash);
     println!("Expected totalEtherAccumulated: {:02x?}", expected_total_ether);
+    println!("Expected signersHash:           {:02x?}", expected_signers_hash);
 
     println!("Verifying saved proof from disk...");
     let publics = PublicValues::write_abi(&output)?;

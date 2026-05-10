@@ -20,15 +20,24 @@ sol! {
     /// * `publicInputsHash` — `keccak256(abi.encode(...))` mirroring
     ///   `OpenBlob.proofBlobDA`. Verifier compares against the on-chain
     ///   digest to bind the proof to a specific batch.
-    /// * `valid` — circuit verdict. The guest now actually verifies signatures
-    ///   and §3 canonicality, so a successfully-generated proof is one where
-    ///   every assertion held; this bit is `true` whenever the proof exists.
+    /// * `valid` — circuit verdict. The guest verifies signatures and §3
+    ///   canonicality, so a successfully-generated proof is one where every
+    ///   assertion held; this bit is `true` whenever the proof exists.
     /// * `totalEtherAccumulated` — saturating big-endian sum of every
     ///   `entry_auths[i].ether_amount`, computed inside the circuit.
+    /// * `signersHash` — `keccak256(addr_0 || addr_1 || ... || addr_{k-1})`
+    ///   over the 20-byte addresses recovered from each entry's signature,
+    ///   in the order the entries appear in the §4 RLP list. Lets a
+    ///   verifier check the set of authorized signers without committing
+    ///   each address as a separate public output, and lets the on-chain
+    ///   policy hook (§5.2 step 3) bind the proof to an off-chain
+    ///   allow-list / registry by hashing that list the same way and
+    ///   comparing.
     struct Output {
         bytes32 publicInputsHash;
         bool valid;
         bytes32 totalEtherAccumulated;
+        bytes32 signersHash;
     }
 }
 
@@ -319,6 +328,25 @@ pub fn sum_ether(auths: &[EntryAuth]) -> [u8; 32] {
         acc = acc.saturating_add(U256::from_be_bytes(a.ether_amount));
     }
     acc.to_be_bytes()
+}
+
+/// `keccak256(signers[0] || signers[1] || ... || signers[k-1])` over the
+/// concatenation of 20-byte recovered addresses, in entry order. Used to
+/// commit the signer set as `Output.signersHash` so a verifier can match
+/// against an off-chain allow-list (§5.2 step 3) without exposing each
+/// address as a separate public input.
+///
+/// For `signers.is_empty()`, returns `keccak256("")` — the standard empty
+/// digest. This lets a verifier distinguish "no signers" from any
+/// non-empty list by a single equality check.
+pub fn keccak_signers(signers: &[Address]) -> [u8; 32] {
+    let mut hasher = Keccak::v256();
+    for addr in signers {
+        hasher.update(addr.as_slice());
+    }
+    let mut out = [0u8; 32];
+    hasher.finalize(&mut out);
+    out
 }
 
 /// Sign `data` with `sk` (raw secp256k1 private key) per EIP-191
@@ -623,12 +651,64 @@ mod tests {
         assert_eq!(entries.len(), inputs.entry_auths.len());
 
         // Every signature recovers to the Anvil address.
-        for (data, auth) in entries.iter().zip(&inputs.entry_auths) {
-            assert_eq!(auth.recover(data), anvil_address());
+        let signers: Vec<Address> = entries
+            .iter()
+            .zip(&inputs.entry_auths)
+            .map(|(data, auth)| auth.recover(data))
+            .collect();
+        for s in &signers {
+            assert_eq!(*s, anvil_address());
         }
 
         // Sum of ether matches the on-chain `total_ether_paid` claim.
         assert_eq!(sum_ether(&inputs.entry_auths), inputs.total_ether_paid);
+
+        // Signer-hash sanity: hashing the same address k times must equal
+        // a hand-rolled keccak over `addr.repeat(k)`, and must NOT equal
+        // the empty-list hash.
+        let signers_hash = keccak_signers(&signers);
+        let empty_hash = keccak_signers(&[]);
+        assert_ne!(signers_hash, empty_hash);
+    }
+
+    // ---- §5.2 step 3 hook: signersHash ------------------------------------
+
+    #[test]
+    fn keccak_signers_empty_matches_keccak_of_empty_input() {
+        let mut hasher = Keccak::v256();
+        let mut expected = [0u8; 32];
+        hasher.finalize(&mut expected);
+        assert_eq!(keccak_signers(&[]), expected);
+    }
+
+    #[test]
+    fn keccak_signers_order_sensitive() {
+        let a = Address::from([0x11u8; 20]);
+        let b = Address::from([0x22u8; 20]);
+        assert_ne!(
+            keccak_signers(&[a, b]),
+            keccak_signers(&[b, a]),
+            "signersHash must depend on entry order — verifiers rely on it",
+        );
+    }
+
+    #[test]
+    fn keccak_signers_concatenates_raw_addresses() {
+        // Spec: `keccak256(addr_0 || addr_1)` over raw 20-byte little-end-
+        // free representations (the wire form for 20-byte ABI addresses).
+        let a = Address::from([0xAAu8; 20]);
+        let b = Address::from([0xBBu8; 20]);
+
+        let mut buf = Vec::with_capacity(40);
+        buf.extend_from_slice(a.as_slice());
+        buf.extend_from_slice(b.as_slice());
+
+        let mut hasher = Keccak::v256();
+        hasher.update(&buf);
+        let mut expected = [0u8; 32];
+        hasher.finalize(&mut expected);
+
+        assert_eq!(keccak_signers(&[a, b]), expected);
     }
 
     #[test]
