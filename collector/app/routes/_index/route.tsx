@@ -8,20 +8,11 @@ import { NextBundleTimer } from "~/components/next-bundle-timer";
 import { Button } from "~/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "~/components/ui/card";
 import { Textarea } from "~/components/ui/textarea";
+import { DEFAULT_SCHEDULE, getCronSchedule } from "~/lib/bundler-cron.server";
 import { nextCronRun } from "~/lib/cron";
 import { listMicroblobs, type Microblob } from "~/lib/kv.server";
 
 import type { Route } from "./+types/route";
-
-const DEFAULT_CRON_SCHEDULE = "* * * * *";
-
-function getCronSchedule(): string {
-  // Mirror the resolution server.ts uses, but tolerate environments where
-  // `Deno` isn't available (e.g. type-checking with tsc).
-  const denoEnv = (globalThis as { Deno?: { env: { get(name: string): string | undefined } } }).Deno?.env;
-  const fromEnv = denoEnv?.get("CRON_SCHEDULE");
-  return fromEnv && fromEnv.trim().length > 0 ? fromEnv : DEFAULT_CRON_SCHEDULE;
-}
 
 export async function loader(_args: Route.LoaderArgs) {
   // Read straight from KV instead of self-fetching `/api/microblobs`. The
@@ -40,7 +31,7 @@ export async function loader(_args: Route.LoaderArgs) {
   try {
     nextRunAt = nextCronRun(cronSchedule);
   } catch {
-    nextRunAt = nextCronRun(DEFAULT_CRON_SCHEDULE);
+    nextRunAt = nextCronRun(DEFAULT_SCHEDULE);
   }
   return { microblobs, cronSchedule, nextRunAt };
 }
@@ -109,7 +100,7 @@ export default function Home({ loaderData }: Route.ComponentProps) {
           <h1 className="font-bold text-4xl tracking-tight">Collect microblobs, post EIP-4844 blobs.</h1>
           <p className="max-w-2xl text-muted-foreground">
             OpenBlob aggregates signed payloads from connected wallets, persists them in Deno KV, and a server-side cron
-            bundles pending microblobs into Ethereum blob transactions every minute.
+            bundles pending microblobs into Ethereum blob transactions on the schedule shown below.
           </p>
           <NextBundleTimer
             schedule={loaderData.cronSchedule}

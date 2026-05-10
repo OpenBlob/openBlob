@@ -20,9 +20,32 @@
 //   - cron isolates only pull in the publisher (and viem) when there is
 //     actually pending work to bundle.
 
-const DEFAULT_SCHEDULE = "0 0 * * *";
+/**
+ * Default cron schedule used when `CRON_SCHEDULE` is unset. Once per day at
+ * 00:00 UTC — the most conservative choice for Deno Deploy isolate cost.
+ *
+ * Exported so the SSR loader can use the same value as the actual cron
+ * registration; previously the route had its own local default of
+ * `"* * * * *"`, which made the "Next bundle in …" countdown wildly wrong
+ * (it would tick down to ~0 every minute even though the cron only fires
+ * once a day).
+ */
+export const DEFAULT_SCHEDULE = "0 0 * * *";
 const CRON_NAME = "openblob-process";
 const REGISTERED_FLAG = "__openblobBundlerCronRegistered__";
+
+/**
+ * Resolves the active cron schedule the same way `registerBundlerCron` does:
+ * read `CRON_SCHEDULE` from the environment and fall back to
+ * `DEFAULT_SCHEDULE` if it's unset or blank. Safe to call from contexts
+ * where `Deno` may not exist (e.g. tsc type-checking) — returns the default
+ * in that case.
+ */
+export function getCronSchedule(): string {
+  const denoEnv = (globalThis as { Deno?: { env: { get(name: string): string | undefined } } }).Deno?.env;
+  const fromEnv = denoEnv?.get("CRON_SCHEDULE")?.trim();
+  return fromEnv && fromEnv.length > 0 ? fromEnv : DEFAULT_SCHEDULE;
+}
 
 async function processPending(): Promise<void> {
   const { listMicroblobs, markBundled } = await import("./kv.server.ts");
@@ -58,7 +81,7 @@ export function registerBundlerCron(): void {
     return;
   }
 
-  const schedule = deno.env.get("CRON_SCHEDULE")?.trim() || DEFAULT_SCHEDULE;
+  const schedule = getCronSchedule();
   try {
     deno.cron(CRON_NAME, schedule, async () => {
       try {
