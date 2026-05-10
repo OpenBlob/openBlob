@@ -20,7 +20,7 @@
 //   - cron isolates only pull in the publisher (and viem) when there is
 //     actually pending work to bundle.
 
-const DEFAULT_SCHEDULE = "*/5 * * * *";
+const DEFAULT_SCHEDULE = "0 0 * * *";
 const CRON_NAME = "openblob-process";
 const REGISTERED_FLAG = "__openblobBundlerCronRegistered__";
 

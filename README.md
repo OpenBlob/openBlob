@@ -2,7 +2,7 @@
 
 > Pay-per-byte data availability on Ethereum, settled by a ZK proof.
 
-**Live on Sepolia at [openblob.space](https://openblob.space)** — connect a wallet, grab some Sepolia ETH from a faucet, deposit, sign a microblob, and watch it land in a real EIP-4844 blob within the next minute.
+**Live on Sepolia at [openblob.space](https://openblob.space)** — connect a wallet, grab some Sepolia ETH from a faucet, deposit, sign a microblob, and watch it land in a real EIP-4844 blob on the next bundling tick (default: once a day; configurable via `CRON_SCHEDULE`).
 
 ---
 
@@ -10,7 +10,7 @@
 
 Posting an EIP-4844 blob costs the same whether you fill 100 bytes or 128 KiB. That makes Ethereum's cheapest data lane essentially unusable for anyone smaller than a rollup — a hobbyist who wants to anchor a tweet, a sensor reading, or a game move pays for 128 KiB of empty space.
 
-OpenBlob is a pay-per-byte data-availability layer that fixes this. Users top up an on-chain collateral pot once, then fire-and-forget tiny *microblobs* over HTTP. A collector aggregates them, packs them into a real EIP-4844 blob every minute, and only gets paid back from the pot if it can prove — in zero knowledge — that the data it promised to publish actually landed in a blob the chain saw.
+OpenBlob is a pay-per-byte data-availability layer that fixes this. Users top up an on-chain collateral pot once, then fire-and-forget tiny *microblobs* over HTTP. A collector aggregates them, packs them into a real EIP-4844 blob on a configurable cadence (the operator picks the schedule — once per day by default, every minute if you want), and only gets paid back from the pot if it can prove — in zero knowledge — that the data it promised to publish actually landed in a blob the chain saw.
 
 Cheap for users. Trustless for everyone. Honest by construction for the operator.
 
@@ -18,7 +18,7 @@ Cheap for users. Trustless for everyone. Honest by construction for the operator
 
 1. **Deposit.** A user calls `deposit()` on the `OpenBlob` contract and parks some ETH as collateral. That's the only L1 touch they ever need.
 2. **Sign & send a microblob.** From the dApp, the user signs an arbitrary payload with EIP-191 `personal_sign` and POSTs `{ address, payload, signature }` to the collector. No gas, no wallet pop-up beyond the signature.
-3. **Bundle.** A `Deno.cron` job wakes up every minute, RLP-frames every pending microblob into a single logical stream, packs it into 4096 × 31-byte canonical BLS field elements, and ships the result as a type-0x03 blob transaction.
+3. **Bundle.** A `Deno.cron` job wakes up on the configured schedule (default: once per day, override with `CRON_SCHEDULE`), RLP-frames every pending microblob into a single logical stream, packs it into 4096 × 31-byte canonical BLS field elements, and ships the result as a type-0x03 blob transaction.
 4. **Prove.** Off-chain, the operator runs a [ZisK](https://0xpolygonhermez.github.io/zisk/) zkVM circuit that:
    - fetches each blob it's claiming from the beacon chain by `(blockNumber, txIndex)`,
    - verifies `kzg_to_versioned_hash(commitment) == blobVersionedHash`,
@@ -39,7 +39,7 @@ sequenceDiagram
 
     User->>L1: deposit() (one-time collateral)
     User->>Collector: POST /api/microblobs<br/>{ address, payload, EIP-191 sig }
-    Note over Collector: Deno.cron, every 60s:<br/>RLP-frame + 31→32 pack
+    Note over Collector: Deno.cron (operator-configured cadence):<br/>RLP-frame + 31→32 pack
     Collector->>L1: type-0x03 blob tx (EIP-4844)
     L1-->>Prover: blobVersionedHashes, blockNumber, txIndex
     Note over Prover: fetch blobs via EL+CL,<br/>decode, recompute Merkle root,<br/>commit publicInputsHash
