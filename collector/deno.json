@@ -1,0 +1,31 @@
+{
+  "nodeModulesDir": "auto",
+  "unstable": ["kv", "cron"],
+  "tasks": {
+    "dev": "deno run -A --unstable-kv --unstable-cron --env-file=.env --node-modules-dir=auto npm:@react-router/dev dev",
+    "build": "deno run -A --node-modules-dir=auto npm:@react-router/dev build",
+    "typegen": "deno run -A --node-modules-dir=auto npm:@react-router/dev typegen",
+    "start": "deno run -A --unstable-kv --unstable-cron --env-file=.env server.ts",
+    "check:server": "deno check server.ts",
+    "typecheck": "deno task typegen && deno run -A --node-modules-dir=auto npm:typescript/tsc --noEmit && deno task check:server",
+    "lint": "deno run -A --node-modules-dir=auto npm:@biomejs/biome check .",
+    "lint:fix": "deno run -A --node-modules-dir=auto npm:@biomejs/biome check . --write",
+    "shadcn": "deno run -A --node-modules-dir=auto npm:shadcn@latest"
+  },
+  "compilerOptions": {
+    "lib": ["DOM", "DOM.Iterable", "ES2022", "deno.ns", "deno.unstable"],
+    "jsx": "react-jsx",
+    "jsxImportSource": "react"
+  },
+  "exclude": [
+    "node_modules",
+    "build",
+    ".react-router"
+  ],
+  "fmt": {
+    "exclude": ["node_modules", "build", ".react-router", "app/**/*"]
+  },
+  "lint": {
+    "exclude": ["node_modules", "build", ".react-router", "app/**/*"]
+  }
+}
