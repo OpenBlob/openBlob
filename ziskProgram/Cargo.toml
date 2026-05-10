@@ -1,5 +1,5 @@
 [workspace]
-members = ["host", "guest", "common"]
+members = ["host", "guest", "common", "blob-sync"]
 resolver = "2"
 
 [workspace.dependencies]
@@ -12,3 +12,9 @@ ziskos = { git = "https://github.com/0xPolygonHermez/zisk.git", tag = "v0.17.0" 
 # inside guest/Cargo.toml has no effect.
 [patch.crates-io]
 tiny-keccak = { git = "https://github.com/0xPolygonHermez/zisk-patch-tiny-keccak", branch = "zisk-patch/v2.0.2" }
+# k256 routes secp256k1 EC ops to ZisK's `syscall_secp256k1_*` precompiles,
+# used by `Signature::recover_address_from_msg` and our `EntryAuth::recover`.
+# Pinned to the patch tag matching `zisk-sdk` v0.17.0; the patch repo is a
+# fork of RustCrypto's `elliptic-curves` workspace, and cargo locates the
+# `k256` member by package name.
+k256 = { git = "https://github.com/0xPolygonHermez/zisk-patch-elliptic-curves", tag = "patch-k256-0.13.4-zisk-0.17.0" }

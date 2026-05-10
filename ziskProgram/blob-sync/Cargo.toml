@@ -1,0 +1,30 @@
+[package]
+name = "blob-sync"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+common = { path = "../common" }
+
+anyhow = "1.0"
+thiserror = "1.0"
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+reqwest = { version = "0.12", features = ["json"] }
+serde = { version = "1.0", features = ["derive"] }
+tracing = "0.1"
+hex = "0.4"
+url = "2"
+
+# alloy primitives + L1 RPC + EIP-4844 helpers. Pinned to the same major as
+# `common` (alloy-primitives 1.5.7) so Cargo unifies all alloy-* crates to one
+# compatible 1.x release.
+alloy-primitives = { version = "1.5.7", features = ["serde"] }
+alloy-eips = { version = "1.0", features = ["serde", "kzg"] }
+alloy-consensus = { version = "1.0", features = ["serde"] }
+alloy-provider = "1.0"
+alloy-rpc-types-eth = { version = "1.0", features = ["serde"] }
+
+# c-kzg drives `verify_blob_kzg_proof_batch` against the trusted setup baked
+# into `EnvKzgSettings::default()`. Version pinned to align with what the
+# alloy 1.x family of crates depends on (currently c-kzg 2.x).
+c-kzg = "2.1"

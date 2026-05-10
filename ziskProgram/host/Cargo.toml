@@ -12,6 +12,7 @@ alloy-sol-types = "1.5.7"
 alloy-primitives = "1.5.7"
 tiny-keccak = { version = "2.0", features = ["keccak"] }
 common = { path = "../common" }
+blob-sync = { path = "../blob-sync" }
 
 [build-dependencies]
 zisk-sdk = { workspace = true }
