@@ -1,3 +1,4 @@
+import { Boxes, Braces, Receipt } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useRevalidator } from "react-router";
 import { useAccount, useSignMessage } from "wagmi";
@@ -167,7 +168,10 @@ export default function Home({ loaderData }: Route.ComponentProps) {
                         </div>
                       </div>
                       <p className="mt-1 truncate text-sm">{m.payload}</p>
-                      <p className="mt-1 truncate font-mono text-muted-foreground text-xs">hash {m.hash}</p>
+                      <div className="mt-1 flex items-center justify-between gap-2">
+                        <p className="truncate font-mono text-muted-foreground text-xs">hash {m.hash}</p>
+                        <BundleLinks microblob={m} />
+                      </div>
                     </li>
                   ))}
                 </ul>
@@ -183,20 +187,55 @@ export default function Home({ loaderData }: Route.ComponentProps) {
 function StatusPill({ microblob }: { microblob: Microblob }) {
   if (microblob.status === "bundled" && microblob.bundleTxHash) {
     return (
-      <a
-        href={`https://sepolia.etherscan.io/tx/${microblob.bundleTxHash}`}
-        target="_blank"
-        rel="noreferrer"
-        className="rounded-full bg-emerald-500/15 px-2 py-0.5 font-medium text-[10px] text-emerald-700 uppercase tracking-wide transition-colors hover:bg-emerald-500/25 dark:text-emerald-300"
-        title={`View blob tx on Etherscan: ${microblob.bundleTxHash}`}
-      >
+      <span className="rounded-full bg-emerald-500/15 px-2 py-0.5 font-medium text-[10px] text-emerald-700 uppercase tracking-wide dark:text-emerald-300">
         bundled
-      </a>
+      </span>
     );
   }
   return (
     <span className="rounded-full bg-muted px-2 py-0.5 font-medium text-[10px] text-muted-foreground uppercase tracking-wide">
       pending
     </span>
+  );
+}
+
+function BundleLinks({ microblob }: { microblob: Microblob }) {
+  if (microblob.status !== "bundled" || !microblob.bundleTxHash) return null;
+  const tx = microblob.bundleTxHash;
+  const linkClass =
+    "inline-flex size-6 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground";
+  return (
+    <div className="flex shrink-0 items-center gap-1">
+      <a
+        href={`https://sepolia.etherscan.io/tx/${tx}`}
+        target="_blank"
+        rel="noreferrer"
+        className={linkClass}
+        title={`View transaction on Sepolia Etherscan: ${tx}`}
+        aria-label="View transaction on Sepolia Etherscan"
+      >
+        <Receipt className="size-3.5" aria-hidden="true" />
+      </a>
+      <a
+        href={`https://sepolia.blobscan.com/tx/${tx}`}
+        target="_blank"
+        rel="noreferrer"
+        className={linkClass}
+        title={`View blobs on Sepolia Blobscan: ${tx}`}
+        aria-label="View blobs on Sepolia Blobscan"
+      >
+        <Boxes className="size-3.5" aria-hidden="true" />
+      </a>
+      <a
+        href={`/api/microblobs/tx/${tx}`}
+        target="_blank"
+        rel="noreferrer"
+        className={linkClass}
+        title={`Fetch microblobs JSON: /api/microblobs/tx/${tx}`}
+        aria-label="Fetch microblobs JSON for this transaction"
+      >
+        <Braces className="size-3.5" aria-hidden="true" />
+      </a>
+    </div>
   );
 }
